@@ -1,0 +1,82 @@
+From 40295e2dc06995b0464fc910be98f45f1fb4c258 Mon Sep 17 00:00:00 2001
+From: Nil Admirari <nil-admirari@mailo.com>
+Date: Wed, 16 Feb 2022 14:25:07 +0300
+Subject: [PATCH v11 4/6] fftools/cmdutils.c: Remove MAX_PATH limit
+
+---
+ fftools/cmdutils.c | 31 +++++++++++++++++++++++++------
+ 1 file changed, 25 insertions(+), 6 deletions(-)
+
+diff --git a/fftools/cmdutils.c b/fftools/cmdutils.c
+index 5d7cdc3e..d42bb04e 100644
+--- a/fftools/cmdutils.c
++++ b/fftools/cmdutils.c
+@@ -50,6 +50,7 @@
+ #include "opt_common.h"
+ #ifdef _WIN32
+ #include <windows.h>
++#include "compat/w32dlfcn.h"
+ #endif
+ 
+ AVDictionary *sws_dict;
+@@ -812,6 +813,9 @@ FILE *get_preset_file(char *filename, size_t filename_size,
+ {
+     FILE *f = NULL;
+     int i;
++#if HAVE_GETMODULEHANDLE && defined(_WIN32)
++    char *datadir = NULL;
++#endif
+     const char *base[3] = { getenv("FFMPEG_DATADIR"),
+                             getenv("HOME"),
+                             FFMPEG_DATADIR, };
+@@ -821,19 +825,31 @@ FILE *get_preset_file(char *filename, size_t filename_size,
+         f = fopen(filename, "r");
+     } else {
+ #if HAVE_GETMODULEHANDLE && defined(_WIN32)
+-        char datadir[MAX_PATH], *ls;
++        wchar_t *datadir_w = get_module_filename(NULL);
+         base[2] = NULL;
+ 
+-        if (GetModuleFileNameA(GetModuleHandleA(NULL), datadir, sizeof(datadir) - 1))
++        if (wchartoansi(datadir_w, &datadir))
++            datadir = NULL;
++        av_free(datadir_w);
++
++        if (datadir)
+         {
+-            for (ls = datadir; ls < datadir + strlen(datadir); ls++)
++            char *ls;
++            for (ls = datadir; *ls; ls++)
+                 if (*ls == '\\') *ls = '/';
+ 
+             if (ls = strrchr(datadir, '/'))
+             {
+-                *ls = 0;
+-                strncat(datadir, "/ffpresets",  sizeof(datadir) - 1 - strlen(datadir));
+-                base[2] = datadir;
++                ptrdiff_t datadir_len = ls - datadir;
++                size_t desired_size = datadir_len + strlen("/ffpresets") + 1;
++                char *new_datadir = av_realloc_array(
++                    datadir, desired_size, sizeof *datadir);
++                if (new_datadir) {
++                    datadir = new_datadir;
++                    datadir[datadir_len] = 0;
++                    strncat(datadir, "/ffpresets",  desired_size - 1 - datadir_len);
++                    base[2] = datadir;
++                }
+             }
+         }
+ #endif
+@@ -853,6 +869,9 @@ FILE *get_preset_file(char *filename, size_t filename_size,
+         }
+     }
+ 
++#if HAVE_GETMODULEHANDLE && defined(_WIN32)
++    av_free(datadir);
++#endif
+     return f;
+ }
+ 
+-- 
+2.32.0
+

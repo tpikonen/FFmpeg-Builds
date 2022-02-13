@@ -1,0 +1,34 @@
+From 831c76daa9dcae02afc2444f98fd630853ed604c Mon Sep 17 00:00:00 2001
+From: Nil Admirari <nil-admirari@mailo.com>
+Date: Fri, 18 Feb 2022 21:34:07 +0300
+Subject: [PATCH v11 6/6] fftools: Set active code page to UTF-8 on Windows
+
+Starting with Windows 1903, applications can set active code page to UTF-8
+in the application manifest. It improves path name compatibility
+with dependencies that use char* pathnames internally, but whose code page
+has already been changed to UTF-8 with a manifest (e.g. AviSynth).
+
+On older versions of Windows, changes in the manifest have no effect.
+---
+ fftools/fftools.manifest | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/fftools/fftools.manifest b/fftools/fftools.manifest
+index 30b7d8fe..d1ac1e4e 100644
+--- a/fftools/fftools.manifest
++++ b/fftools/fftools.manifest
+@@ -3,8 +3,10 @@
+ <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+   <assemblyIdentity type="win32" name="FFmpeg" version="1.0.0.0"/>
+   <application xmlns="urn:schemas-microsoft-com:asm.v3">
+-    <windowsSettings xmlns:ws2016="http://schemas.microsoft.com/SMI/2016/WindowsSettings">
++    <windowsSettings xmlns:ws2016="http://schemas.microsoft.com/SMI/2016/WindowsSettings"
++                     xmlns:ws2019="http://schemas.microsoft.com/SMI/2019/WindowsSettings">
+       <ws2016:longPathAware>true</ws2016:longPathAware>
++      <ws2019:activeCodePage>UTF-8</ws2019:activeCodePage>
+     </windowsSettings>
+   </application>
+ </assembly>
+-- 
+2.32.0
+

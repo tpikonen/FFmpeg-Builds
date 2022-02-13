@@ -1,0 +1,51 @@
+From dd0b07b44d2336280b436784e80ef4a52a81b670 Mon Sep 17 00:00:00 2001
+From: Nil Admirari <nil-admirari@mailo.com>
+Date: Thu, 9 Jun 2022 22:39:29 +0300
+Subject: [PATCH v13 1/5] Fix upstream
+
+---
+ libavcodec/mf_utils.h    | 1 +
+ libavformat/os_support.h | 6 +++---
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/libavcodec/mf_utils.h b/libavcodec/mf_utils.h
+index 3b12344..aebfb9a 100644
+--- a/libavcodec/mf_utils.h
++++ b/libavcodec/mf_utils.h
+@@ -29,6 +29,7 @@
+ // mf*.h headers below indirectly include strmif.h.)
+ #include <icodecapi.h>
+ #else
++#define NO_DSHOW_STRSAFE
+ #include <dshow.h>
+ // Older versions of mingw-w64 need codecapi.h explicitly included, while newer
+ // ones include it implicitly from dshow.h (via uuids.h).
+diff --git a/libavformat/os_support.h b/libavformat/os_support.h
+index 958976c..ba9efda 100644
+--- a/libavformat/os_support.h
++++ b/libavformat/os_support.h
+@@ -238,10 +238,10 @@ static inline int win32_stat(const char *filename_utf8, struct win32_stat *buf)
+         return -1;
+ 
+     if (filename_w) {
+-        ret = _wstat64(filename_w, &crtstat);
++        ret = _wstati64(filename_w, &crtstat);
+         av_free(filename_w);
+     } else
+-        ret = _stat64(filename_utf8, &crtstat);
++        ret = _stati64(filename_utf8, &crtstat);
+ 
+     copy_stat(&crtstat, buf);
+ 
+@@ -253,7 +253,7 @@ static inline int win32_fstat(int fd, struct win32_stat *buf)
+     struct _stati64 crtstat = { 0 };
+     int ret;
+ 
+-    ret = _fstat64(fd, &crtstat);
++    ret = _fstati64(fd, &crtstat);
+ 
+     copy_stat(&crtstat, buf);
+ 
+-- 
+2.34.1
+

@@ -1,0 +1,60 @@
+From 80c2e3c1f5d0d65160be6934aa6523e3d520a510 Mon Sep 17 00:00:00 2001
+From: Nil Admirari <nil-admirari@mailo.com>
+Date: Fri, 10 Jun 2022 21:10:35 +0300
+Subject: [PATCH v18 5/5] libavfilter/vf_frei0r.c: Use UTF-8 version of
+ getenv()
+
+---
+ libavfilter/vf_frei0r.c | 16 +++++++++++-----
+ 1 file changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/libavfilter/vf_frei0r.c b/libavfilter/vf_frei0r.c
+index f11ae6e55c..9a7a11604a 100644
+--- a/libavfilter/vf_frei0r.c
++++ b/libavfilter/vf_frei0r.c
+@@ -31,6 +31,7 @@
+ #include "libavutil/avstring.h"
+ #include "libavutil/common.h"
+ #include "libavutil/eval.h"
++#include "libavutil/getenv_utf8.h"
+ #include "libavutil/imgutils.h"
+ #include "libavutil/internal.h"
+ #include "libavutil/mathematics.h"
+@@ -204,7 +205,7 @@ static av_cold int frei0r_init(AVFilterContext *ctx,
+     }
+ 
+     /* see: http://frei0r.dyne.org/codedoc/html/group__pluglocations.html */
+-    if ((path = av_strdup(getenv("FREI0R_PATH")))) {
++    if ((path = getenv_utf8("FREI0R_PATH"))) {
+ #ifdef _WIN32
+         const char *separator = ";";
+ #else
+@@ -227,16 +228,21 @@ static av_cold int frei0r_init(AVFilterContext *ctx,
+         }
+ 
+     check_path_end:
+-        av_free(path);
++        freeenv_utf8(path);
+         if (ret < 0)
+             return ret;
+     }
+-    if (!s->dl_handle && (path = getenv("HOME"))) {
++    if (!s->dl_handle && (path = getenv_utf8("HOME"))) {
+         char *prefix = av_asprintf("%s/.frei0r-1/lib/", path);
+-        if (!prefix)
+-            return AVERROR(ENOMEM);
++        if (!prefix) {
++            ret = AVERROR(ENOMEM);
++            goto home_path_end;
++        }
+         ret = load_path(ctx, &s->dl_handle, prefix, dl_name);
+         av_free(prefix);
++
++    home_path_end:
++        freeenv_utf8(path);
+         if (ret < 0)
+             return ret;
+     }
+-- 
+2.34.1
+

@@ -1,0 +1,215 @@
+From d8690b60012fda4af35151d3c4a3bbac183eeb71 Mon Sep 17 00:00:00 2001
+From: Nil Admirari <nil-admirari@mailo.com>
+Date: Wed, 16 Feb 2022 14:11:15 +0300
+Subject: [PATCH v18 1/5] libavutil: Add wchartoutf8(), wchartoansi(),
+ utf8toansi(), getenv_utf8() and freeenv_utf8()
+
+wchartoutf8() converts strings returned by WinAPI into UTF-8,
+which is FFmpeg's preffered encoding.
+
+Some external dependencies, such as AviSynth, are still
+not Unicode-enabled. utf8toansi() converts UTF-8 strings
+into ANSI in two steps: UTF-8 -> wchar_t -> ANSI.
+wchartoansi() is responsible for the second step of the conversion.
+Conversion in just one step is not supported by WinAPI.
+
+Since these character converting functions allocate the buffer
+of necessary size, they also facilitate the removal of MAX_PATH limit
+in places where fixed-size ANSI/WCHAR strings were used
+as filename buffers.
+
+getenv_utf8() wraps _wgetenv() converting its input from
+and its output to UTF-8. Compared to plain getenv(),
+getenv_utf8() requires a cleanup.
+
+Because of that, in places that only test the existence of
+an environment variable or compare its value with a string
+consisting entirely of ASCII characters, the use of plain getenv()
+is still preferred. (libavutil/log.c check_color_terminal()
+is an example of such a place.)
+
+Plain getenv() is also preffered in UNIX-only code,
+such as bktr.c, fbdev_common.c, oss.c in libavdevice
+or af_ladspa.c in libavfilter.
+---
+ configure                  |  1 +
+ libavutil/getenv_utf8.h    | 83 ++++++++++++++++++++++++++++++++++++++
+ libavutil/wchar_filename.h | 53 ++++++++++++++++++++++++
+ 3 files changed, 137 insertions(+)
+ create mode 100644 libavutil/getenv_utf8.h
+
+diff --git a/configure b/configure
+index 7ffbb85e21..3a97610209 100755
+--- a/configure
++++ b/configure
+@@ -2272,6 +2272,7 @@ SYSTEM_FUNCS="
+     fcntl
+     getaddrinfo
+     getauxval
++    getenv
+     gethrtime
+     getopt
+     GetModuleHandle
+diff --git a/libavutil/getenv_utf8.h b/libavutil/getenv_utf8.h
+new file mode 100644
+index 0000000000..799fef9839
+--- /dev/null
++++ b/libavutil/getenv_utf8.h
+@@ -0,0 +1,83 @@
++/*
++ * This file is part of FFmpeg.
++ *
++ * FFmpeg is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * FFmpeg is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with FFmpeg; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++#ifndef AVUTIL_GETENV_UTF8_H
++#define AVUTIL_GETENV_UTF8_H
++
++#include <stdlib.h>
++
++#include "config.h"
++#include "mem.h"
++
++#if HAVE_GETENV
++
++#ifdef _WIN32
++
++#include "libavutil/wchar_filename.h"
++
++static inline char *getenv_utf8(const char *varname)
++{
++    wchar_t *varname_w, *var_w;
++    char *var;
++
++    if (utf8towchar(varname, &varname_w))
++        return NULL;
++    if (!varname_w)
++        return NULL;
++
++    var_w = _wgetenv(varname_w);
++    av_free(varname_w);
++
++    if (!var_w)
++        return NULL;
++    if (wchartoutf8(var_w, &var))
++        return NULL;
++
++    return var;
++
++    // No CP_ACP fallback compared to other *_utf8() functions:
++    // non UTF-8 strings must not be returned.
++}
++
++static inline void freeenv_utf8(const char *var)
++{
++    av_free(var);
++}
++
++#else
++
++static inline char *getenv_utf8(const char *varname)
++{
++    return getenv(varname);
++}
++
++static inline void freeenv_utf8(const char *)
++{
++}
++
++#endif // _WIN32
++
++#else
++
++#define getenv_utf8(x) NULL
++
++#define freeenv_utf8(x) ((void) 0)
++
++#endif // HAVE_GETENV
++
++#endif // AVUTIL_GETENV_UTF8_H
+diff --git a/libavutil/wchar_filename.h b/libavutil/wchar_filename.h
+index f36d9dfea3..08de073ed7 100644
+--- a/libavutil/wchar_filename.h
++++ b/libavutil/wchar_filename.h
+@@ -20,6 +20,8 @@
+ #define AVUTIL_WCHAR_FILENAME_H
+ 
+ #ifdef _WIN32
++
++#define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
+ #include "mem.h"
+ 
+@@ -41,6 +43,57 @@ static inline int utf8towchar(const char *filename_utf8, wchar_t **filename_w)
+     return 0;
+ }
+ 
++av_warn_unused_result
++static inline int wchartocp(unsigned int code_page, const wchar_t *filename_w,
++                            char **filename)
++{
++    DWORD flags = code_page == CP_UTF8 ? WC_ERR_INVALID_CHARS : 0;
++    int num_chars = WideCharToMultiByte(code_page, flags, filename_w, -1,
++                                        NULL, 0, NULL, NULL);
++    if (num_chars <= 0) {
++        *filename = NULL;
++        return 0;
++    }
++    *filename = av_malloc_array(num_chars, sizeof *filename);
++    if (!*filename) {
++        errno = ENOMEM;
++        return -1;
++    }
++    WideCharToMultiByte(code_page, flags, filename_w, -1,
++                        *filename, num_chars, NULL, NULL);
++    return 0;
++}
++
++av_warn_unused_result
++static inline int wchartoutf8(const wchar_t *filename_w, char **filename)
++{
++    return wchartocp(CP_UTF8, filename_w, filename);
++}
++
++av_warn_unused_result
++static inline int wchartoansi(const wchar_t *filename_w, char **filename)
++{
++    return wchartocp(CP_ACP, filename_w, filename);
++}
++
++av_warn_unused_result
++static inline int utf8toansi(const char *filename_utf8, char **filename)
++{
++    wchar_t *filename_w = NULL;
++    int ret = -1;
++    if (utf8towchar(filename_utf8, &filename_w))
++        return -1;
++
++    if (!filename_w) {
++        *filename = NULL;
++        return 0;
++    }
++
++    ret = wchartoansi(filename_w, filename);
++    av_free(filename_w);
++    return ret;
++}
++
+ /**
+  * Checks for extended path prefixes for which normalization needs to be skipped.
+  * see .NET6: PathInternal.IsExtended()
+-- 
+2.34.1
+
